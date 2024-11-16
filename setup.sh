@@ -70,6 +70,41 @@ EOL
     fi
 }
 
+create_ha_config() {
+    local config_dir="$1/config"
+    local source_config="./configuration.yaml"
+    local config_file="$config_dir/configuration.yaml"
+    
+    # Copy configuration.yaml if it exists in the source directory
+    if [ -f "$source_config" ]; then
+        cp "$source_config" "$config_file"
+        print_status "${GREEN}" "Copied configuration.yaml from repository"
+    else
+        print_status "${RED}" "Warning: configuration.yaml not found in repository"
+    fi
+
+    # Create empty YAML files if they don't exist
+    local yaml_files=(
+        "automations.yaml"
+        "scripts.yaml"
+        "scenes.yaml"
+        "sensors.yaml"
+        "binary_sensors.yaml"
+        "input_datetimes.yaml"
+        "utility_meter.yaml"
+    )
+
+    for file in "${yaml_files[@]}"; do
+        if [ ! -f "$config_dir/$file" ]; then
+            # Add default empty lists to prevent HA warnings
+            echo "[]" > "$config_dir/$file"
+            print_status "${GREEN}" "Created empty $file"
+        else
+            print_status "${YELLOW}" "$file already exists"
+        fi
+    done
+}
+
 # Main setup script
 main() {
     print_status "${GREEN}" "Starting setup for Docker Compose environment..."
@@ -93,6 +128,7 @@ main() {
 
     # Create MQTT configuration
     create_mqtt_config "$BASE_DIR/mosquitto"
+    create_ha_config "$BASE_DIR"
 
     # Create .env file
     create_env_file
