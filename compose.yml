@@ -1,0 +1,150 @@
+networks:
+  secured_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+services:
+  homeassistant:
+    container_name: homeassistant
+    image: "homeassistant/home-assistant:latest"
+    volumes:
+      - ${ROOT_DIR}/home_assistant/config:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /run/dbus:/run/dbus:ro
+      - ${DATA_DIR}/ha-backups:/config/backups
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/video0:/dev/video0
+    network_mode: host
+    environment:
+      - DISABLE_JEMALLOC=true
+      - TZ=${TIMEZONE}
+
+  tunnel:
+    container_name: tunnel
+    image: cloudflare/cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    networks:
+      secured_net:
+        ipv4_address: 172.20.0.3
+    extra_hosts:
+      - "host.docker.internal:${LOCAL_IP}"
+    restart: unless-stopped
+
+  nodered:
+    container_name: nodered
+    image: nodered/node-red:latest
+    ports:
+      - "1880:1880"
+    volumes:
+      - ${ROOT_DIR}/home_assistant/nodered:/data
+    restart: unless-stopped
+    environment:
+      - TZ=${TIMEZONE}
+    depends_on:
+      - homeassistant
+    networks:
+      secured_net:
+        ipv4_address: 172.20.0.4
+    extra_hosts:
+      - "host.docker.internal:${LOCAL_IP}"
+
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    profiles:
+      - no-auto-start
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "67:67/udp"
+      - "8081:80/tcp"
+    volumes:
+      - ${ROOT_DIR}/home_assistant/pihole/etc-pihole:/etc/pihole
+      - ${ROOT_DIR}/home_assistant/pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    environment:
+      - TZ=${TIMEZONE}
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+  go2rtc:
+    container_name: go2rtc
+    image: alexxit/go2rtc:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ${ROOT_DIR}/home_assistant/go2rtc:/config  # For configuration files
+    ports:
+      - "1984:1984"   # Web interface/API
+      - "8554:8554"   # RTSP
+      - "8555:8555/tcp"   # WebRTC
+      - "8555:8555/udp"   # WebRTC
+    environment:
+      - TZ=${TIMEZONE}
+
+  actualbudget:
+    container_name: actualbudget
+    image: actualbudget/actual-server:latest
+    profiles:
+      - no-auto-start
+    ports:
+      - "5006:5006"
+    volumes:
+      - ${ROOT_DIR}/home_assistant/actual-budget:/data
+      - ${ROOT_DIR}/home_assistant/ssl_certs/actual.local.pem:/app/cert.pem:ro
+      - ${ROOT_DIR}/home_assistant/ssl_certs/actual.local-key.pem:/app/key.pem:ro
+    environment:
+      - ACTUAL_HTTPS_CERT=/app/cert.pem
+      - ACTUAL_HTTPS_KEY=/app/key.pem
+      - ACTUAL_PORT=5006
+    restart: unless-stopped
+
+  mqtt:
+    container_name: mqtt
+    image: eclipse-mosquitto:latest
+    volumes:
+      - ${ROOT_DIR}/home_assistant/mosquitto/config:/mosquitto/config
+      - ${ROOT_DIR}/home_assistant/mosquitto/data:/mosquitto/data
+      - ${ROOT_DIR}/home_assistant/mosquitto/log:/mosquitto/log
+    ports:
+      - 1883:1883 # MQTT port
+      - 9001:9001 # Websockets, optional
+    restart: unless-stopped
+
+  faster-whisper:
+    container_name: faster-whisper
+    image: rhasspy/wyoming-whisper
+    restart: unless-stopped
+    runtime: nvidia
+    hostname: faster-whisper
+    init: false
+    ports:
+      - "10300:10300/tcp"
+    volumes:
+      - ${ROOT_DIR}/home_assistant/whisper_models:/share/whisper
+      - ${ROOT_DIR}/home_assistant/whisper_data:/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    stdin_open: true
+    tty: true
+    environment:
+      - WHISPER_PORT=10300
+      - WHISPER_MODEL=tiny-int8
+      - WHISPER_BEAM_SIZE=1
+      - WHISPER_LANGUAGE=en
+      - WHISPER_DEBUG=true
+    command: >
+      python3 -m wyoming_faster_whisper
+      --uri tcp://0.0.0.0:10300
+      --data-dir /data
+      --model tiny-int8
+      --language en
+      --beam-size 1
+      --debug
