@@ -28,7 +28,7 @@ create_dir() {
 
 # Function to create a basic .env file if it doesn't exist
 create_env_file() {
-    local env_file=".env"
+    local env_file="${HOME}/.env"
     if [ ! -f "$env_file" ]; then
         cat > "$env_file" << EOL
 # Local static IP address of your host machine
